@@ -44,7 +44,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     path::PathBuf,
-    sync::mpsc,
+    sync::{mpsc, Arc},
     time::Duration,
 };
 use unicode_width_16::UnicodeWidthChar;
@@ -101,15 +101,14 @@ impl Terminal {
         pty: &mut Pty,
         timeout: Option<Duration>,
     ) -> std::io::Result<()> {
-        let poller = polling::Poller::new().expect("polling is available");
+        let poller = Arc::new(polling::Poller::new().expect("polling is available"));
         // SAFETY: Poller requires us to manually delete the source before
         // dropping, and we'll do just that.
         unsafe {
             let interest = polling::Event::readable(0);
             let mode = polling::PollMode::Level;
-            poller
-                .add_with_mode(pty.file(), interest, mode)
-                .expect("level-triggered polling is available");
+            pty.register(&poller, interest, mode)
+                .expect("level-trigger polling is available");
         }
 
         let mut parser: Processor<StdSyncHandler> = Processor::new();
@@ -132,7 +131,7 @@ impl Terminal {
         }
 
         // Delete the source from the poller before dropping.
-        poller.delete(pty.file()).unwrap();
+        pty.deregister(&poller).unwrap();
 
         Ok(())
     }
