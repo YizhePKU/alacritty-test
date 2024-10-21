@@ -4,7 +4,7 @@
 //! # Examples
 //!
 //! ```no_run
-//! use alacritty_test::{extract_text, pty_spawn, EventedReadWrite, Terminal};
+//! use alacritty_test::{extract_text, pty_spawn, PtyExt, Terminal};
 //! use std::{io::Write, time::Duration};
 //!
 //! // create a PTY and spawn a child process into the slave end
@@ -15,14 +15,14 @@
 //! terminal.read_from_pty(&mut pty, Some(Duration::from_millis(200)))?;
 //!
 //! // send keystrokes to the application (note that pressing ENTER is '\r')
-//! pty.writer().write_all(b"Hello world!\r")?;
-//! pty.writer().write_all(b"Second line!\r")?;
+//! pty.write_all(b"Hello world!\r")?;
+//! pty.write_all(b"Second line!\r")?;
 //!
 //! // read the response from the application
 //! terminal.read_from_pty(&mut pty, Some(Duration::from_millis(200)))?;
 //!
 //! // (optional) quit the application with Ctrl+C
-//! pty.writer().write_all(b"\x03")?;
+//! pty.write_all(b"\x03")?;
 //! terminal.read_from_pty(&mut pty, None).unwrap_err();
 //!
 //! // render the content of the terminal
@@ -218,4 +218,28 @@ pub fn extract_text<T>(terminal: &alacritty_terminal::Term<T>) -> Vec<String> {
             .push(cell.c);
     }
     text
+}
+
+pub trait PtyExt {
+    /// Like `std::io::Write::write_all()`, except writing zeros bytes is not
+    /// considered an error and will be retried.
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()>;
+}
+
+impl PtyExt for Pty {
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        loop {
+            match self.writer().write_all(buf) {
+                Ok(n) => return Ok(n),
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::WriteZero {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }
+        }
+    }
 }
