@@ -113,11 +113,21 @@ impl Terminal {
 
         let mut parser: Processor<StdSyncHandler> = Processor::new();
         let mut _polling_events = polling::Events::new();
-        while poller.wait(&mut _polling_events, timeout)? > 0 {
-            let mut buf = [0; 1000];
-
+        loop {
             // Read from the PTY.
+            let mut buf = [0; 1000];
             let n = pty.reader().read(&mut buf)?;
+
+            // Poll if the read would block. On Windows, it's important to
+            // always attempt a read before polling, otherwise
+            // `alacritty_terminal` won't arrange for the event to be posted.
+            if n == 0 {
+                if poller.wait(&mut _polling_events, timeout)? > 0 {
+                    continue;
+                } else {
+                    break;
+                }
+            }
 
             // Update the terminal state.
             for byte in &buf[..n] {
