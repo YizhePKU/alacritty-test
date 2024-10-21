@@ -8,7 +8,7 @@
 //! use std::{io::Write, time::Duration};
 //!
 //! // create a PTY and spawn a child process into the slave end
-//! let mut pty = pty_spawn("target/debug/examples/basic", vec![], None);
+//! let mut pty = pty_spawn("target/debug/examples/basic", vec![], None)?;
 //! let mut terminal = Terminal::new();
 //!
 //! // read the prompt from the application
@@ -31,6 +31,8 @@
 //! for line in text {
 //!     println!("{}", line);
 //! }
+//!
+//! # Ok::<(), std::io::Error>(())
 //! ```
 
 use alacritty_terminal::{
@@ -107,6 +109,12 @@ impl Terminal {
         unsafe {
             let interest = polling::Event::readable(0);
             let mode = polling::PollMode::Level;
+
+            #[cfg(not(windows))]
+            poller
+                .add_with_mode(pty.file(), interest, mode)
+                .expect("level-trigger polling is available");
+            #[cfg(windows)]
             pty.register(&poller, interest, mode)
                 .expect("level-trigger polling is available");
         }
@@ -116,11 +124,11 @@ impl Terminal {
         loop {
             // Read from the PTY.
             let mut buf = [0; 1000];
-            let n = pty.reader().read(&mut buf)?;
+            let n = pty.reader().read(&mut buf).unwrap_or(0);
 
-            // Poll if the read would block. On Windows, it's important to
-            // always attempt a read before polling, otherwise
-            // `alacritty_terminal` won't arrange for the event to be posted.
+            // Poll if the read would block. It's important to always attempt a
+            // read before polling, otherwise `alacritty_terminal` won't arrange
+            // for an event to be posted.
             if n == 0 {
                 if poller.wait(&mut _polling_events, timeout)? > 0 {
                     continue;
@@ -141,6 +149,9 @@ impl Terminal {
         }
 
         // Delete the source from the poller before dropping.
+        #[cfg(not(windows))]
+        poller.delete(pty.file()).unwrap();
+        #[cfg(windows)]
         pty.deregister(&poller).unwrap();
 
         Ok(())
